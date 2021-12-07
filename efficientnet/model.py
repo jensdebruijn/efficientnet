@@ -369,7 +369,7 @@ def _get_model_by_name(
         pooling=pooling,
     )
 
-    model.name = model_name
+    # model.name = model_name
 
     if weights:
         if not include_top:
