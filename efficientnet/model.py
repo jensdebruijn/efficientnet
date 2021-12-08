@@ -25,6 +25,7 @@ from __future__ import print_function
 
 import collections
 import math
+import string
 import numpy as np
 import six
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -118,7 +119,7 @@ def SEBlock(block_args, global_params):
     return block
 
 
-def MBConvBlock(block_args, global_params, drop_connect_rate=None):
+def MBConvBlock(block_args, global_params, drop_connect_rate=None, prefix=''):
     batch_norm_momentum = global_params.batch_norm_momentum
     batch_norm_epsilon = global_params.batch_norm_epsilon
 
@@ -148,13 +149,15 @@ def MBConvBlock(block_args, global_params, drop_connect_rate=None):
                 kernel_initializer=conv_kernel_initializer,
                 padding="same",
                 use_bias=False,
+                name=prefix + 'expand_conv'
             )(inputs)
             x = KL.BatchNormalization(
                 axis=channel_axis,
                 momentum=batch_norm_momentum,
                 epsilon=batch_norm_epsilon,
+                name=prefix + 'expand_bn'
             )(x)
-            x = Swish()(x)
+            x = Swish(name=prefix + 'expand_activation')(x)
         else:
             x = inputs
 
@@ -164,11 +167,12 @@ def MBConvBlock(block_args, global_params, drop_connect_rate=None):
             depthwise_initializer=conv_kernel_initializer,
             padding="same",
             use_bias=False,
+            name=prefix + 'dwconv'
         )(x)
         x = KL.BatchNormalization(
-            axis=channel_axis, momentum=batch_norm_momentum, epsilon=batch_norm_epsilon
+            axis=channel_axis, momentum=batch_norm_momentum, epsilon=batch_norm_epsilon, name=prefix + 'bn'
         )(x)
-        x = Swish()(x)
+        x = Swish(name=prefix + 'activation')(x)
 
         if has_se:
             x = SEBlock(block_args, global_params)(x)
@@ -239,7 +243,7 @@ def EfficientNet(
     drop_rate = global_params.drop_connect_rate or 0
     drop_rate_dx = drop_rate / n_blocks
 
-    for block_args in block_args_list:
+    for idx, block_args in enumerate(block_args_list):
         assert block_args.num_repeat > 0
         # Update block input and output filters based on depth multiplier.
         block_args = block_args._replace(
@@ -250,7 +254,8 @@ def EfficientNet(
 
         # The first block needs to take care of stride and filter size increase.
         x = MBConvBlock(
-            block_args, global_params, drop_connect_rate=drop_rate_dx * block_idx
+            block_args, global_params, drop_connect_rate=drop_rate_dx * block_idx,
+            prefix='block{}a_'.format(idx + 1)
         )(x)
         block_idx += 1
 
@@ -259,9 +264,14 @@ def EfficientNet(
                 input_filters=block_args.output_filters, strides=[1, 1]
             )
 
-        for _ in xrange(block_args.num_repeat - 1):
+        for bidx in xrange(block_args.num_repeat - 1):
+            block_prefix = 'block{}{}_'.format(
+                idx + 1,
+                string.ascii_lowercase[bidx + 1]
+            )
             x = MBConvBlock(
-                block_args, global_params, drop_connect_rate=drop_rate_dx * block_idx
+                block_args, global_params, drop_connect_rate=drop_rate_dx * block_idx,
+                prefix=block_prefix
             )(x)
             block_idx += 1
 
